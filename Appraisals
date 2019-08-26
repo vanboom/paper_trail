@@ -7,32 +7,20 @@
 # > the version from the appraisal takes precedence.
 # > https://github.com/thoughtbot/appraisal
 
-appraise "ar3" do
-  gem "activerecord", "~> 3.2.22"
-  gem "i18n", "~> 0.6.11"
-  gem "request_store", "~> 1.1.0"
-  gem "sinatra", "~> 1.4.6"
-
-  group :development, :test do
-    gem 'railties', '~> 3.2.22'
-    gem 'test-unit', '~> 3.1.5'
-    platforms :ruby do
-      gem 'mysql2', '~> 0.3.20'
-    end
-  end
+appraise "ar-4.0" do
+  gem "activerecord", "~> 4.0"
 end
 
-appraise "ar4" do
+appraise "ar-4.2" do
   gem "activerecord", "~> 4.2"
-  gem "sinatra", "~> 1.4.6"
 end
 
-appraise "ar5" do
-  gem "activerecord", "~> 5.0.0"
-  gem "rspec-rails", "~> 3.5.1"
-  gem 'rails-controller-testing'
+appraise "ar-5.0" do
+  gem "activerecord", "~> 5.0.3"
+  gem "rails-controller-testing"
+end
 
-  # The AR5 version of PaperTrail is not compatible with sinatra 2 yet.
-  # Contributions welcome.
-  # gem "sinatra", "2.0.0.beta2"
+appraise "ar-5.1" do
+  gem "rails", "5.1.1"
+  gem "rails-controller-testing"
 end

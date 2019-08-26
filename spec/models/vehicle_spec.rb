@@ -1,5 +1,5 @@
-require "rails_helper"
+require "spec_helper"
 
-describe Vehicle, type: :model do
-  it { is_expected.to_not be_versioned }
+RSpec.describe Vehicle, type: :model do
+  it { is_expected.not_to be_versioned }
 end

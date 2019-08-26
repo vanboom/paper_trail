@@ -1,26 +1,51 @@
 module PaperTrail
   # Represents the "paper trail" for a single record.
   class RecordTrail
+    # The respond_to? check here is specific to ActiveRecord 4.0 and can be
+    # removed when support for ActiveRecord < 4.2 is dropped.
+    RAILS_GTE_5_1 = ::ActiveRecord.respond_to?(:gem_version) &&
+      ::ActiveRecord.gem_version >= ::Gem::Version.new("5.1.0.beta1")
+
     def initialize(record)
       @record = record
+      @in_after_callback = false
     end
 
     # Utility method for reifying. Anything executed inside the block will
     # appear like a new record.
+    #
+    # > .. as best as I can tell, the purpose of
+    # > appear_as_new_record was to attempt to prevent the callbacks in
+    # > AutosaveAssociation (which is the module responsible for persisting
+    # > foreign key changes earlier than most people want most of the time
+    # > because backwards compatibility or the maintainer hates himself or
+    # > something) from running. By also stubbing out persisted? we can
+    # > actually prevent those. A more stable option might be to use suppress
+    # > instead, similar to the other branch in reify_has_one.
+    # > -Sean Griffin (https://github.com/airblade/paper_trail/pull/899)
+    #
     def appear_as_new_record
       @record.instance_eval {
         alias :old_new_record? :new_record?
         alias :new_record? :present?
+        alias :old_persisted? :persisted?
+        alias :persisted? :nil?
       }
       yield
-      @record.instance_eval { alias :new_record? :old_new_record? }
+      @record.instance_eval {
+        alias :new_record? :old_new_record?
+        alias :persisted? :old_persisted?
+      }
     end
 
     def attributes_before_change
-      changed = @record.changed_attributes.select { |k, _v|
-        @record.class.column_names.include?(k)
-      }
-      @record.attributes.merge(changed)
+      Hash[@record.attributes.map do |k, v|
+        if @record.class.column_names.include?(k)
+          [k, attribute_in_previous_version(k)]
+        else
+          [k, v]
+        end
+      end]
     end
 
     def changed_and_not_ignored
@@ -34,7 +59,7 @@ module PaperTrail
           }
       end
       skip = @record.paper_trail_options[:skip]
-      @record.changed - ignore - skip
+      changed_in_latest_version - ignore - skip
     end
 
     # Invoked after rollbacks to ensure versions records are not created for
@@ -65,7 +90,7 @@ module PaperTrail
 
     # @api private
     def changes
-      notable_changes = @record.changes.delete_if { |k, _v|
+      notable_changes = changes_in_latest_version.delete_if { |k, _v|
         !notably_changed.include?(k)
       }
       AttributeSerializers::ObjectChangesAttribute.
@@ -87,7 +112,7 @@ module PaperTrail
     # changed.
     def ignored_attr_has_changed?
       ignored = @record.paper_trail_options[:ignore] + @record.paper_trail_options[:skip]
-      ignored.any? && (@record.changed & ignored).any?
+      ignored.any? && (changed_in_latest_version & ignored).any?
     end
 
     # Returns true if this instance is the current, live one;
@@ -96,30 +121,47 @@ module PaperTrail
       source_version.nil?
     end
 
+    # Updates `data` from the model's `meta` option and from `controller_info`.
     # @api private
-    def merge_metadata(data)
-      # First we merge the model-level metadata in `meta`.
-      @record.paper_trail_options[:meta].each do |k, v|
-        data[k] =
-          if v.respond_to?(:call)
-            v.call(@record)
-          elsif v.is_a?(Symbol) && @record.respond_to?(v, true)
-            # If it is an attribute that is changing in an existing object,
-            # be sure to grab the current version.
-            if @record.has_attribute?(v) &&
-                @record.send("#{v}_changed?".to_sym) &&
-                data[:event] != "create"
-              @record.send("#{v}_was".to_sym)
-            else
-              @record.send(v)
-            end
-          else
-            v
-          end
-      end
+    def merge_metadata_into(data)
+      merge_metadata_from_model_into(data)
+      merge_metadata_from_controller_into(data)
+    end
 
-      # Second we merge any extra data from the controller (if available).
+    # Updates `data` from `controller_info`.
+    # @api private
+    def merge_metadata_from_controller_into(data)
       data.merge(PaperTrail.controller_info || {})
+    end
+
+    # Updates `data` from the model's `meta` option.
+    # @api private
+    def merge_metadata_from_model_into(data)
+      @record.paper_trail_options[:meta].each do |k, v|
+        data[k] = model_metadatum(v, data[:event])
+      end
+    end
+
+    # Given a `value` from the model's `meta` option, returns an object to be
+    # persisted. The `value` can be a simple scalar value, but it can also
+    # be a symbol that names a model method, or even a Proc.
+    # @api private
+    def model_metadatum(value, event)
+      if value.respond_to?(:call)
+        value.call(@record)
+      elsif value.is_a?(Symbol) && @record.respond_to?(value, true)
+        # If it is an attribute that is changing in an existing object,
+        # be sure to grab the current version.
+        if event != "create" &&
+            @record.has_attribute?(value) &&
+            attribute_changed_in_latest_version?(value)
+          attribute_in_previous_version(value)
+        else
+          @record.send(value)
+        end
+      else
+        value
+      end
     end
 
     # Returns the object (not a Version) as it became next.
@@ -128,7 +170,7 @@ module PaperTrail
     def next_version
       subsequent_version = source_version.next
       subsequent_version ? subsequent_version.reify : @record.class.find(@record.id)
-    rescue # TODO: Rescue something more specific
+    rescue StandardError # TODO: Rescue something more specific
       nil
     end
 
@@ -164,7 +206,19 @@ module PaperTrail
     end
 
     def record_create
+      @in_after_callback = true
       return unless enabled?
+      versions_assoc = @record.send(@record.class.versions_association_name)
+      version = versions_assoc.create! data_for_create
+      update_transaction_id(version)
+      save_associations(version)
+    ensure
+      @in_after_callback = false
+    end
+
+    # Returns data for record create
+    # @api private
+    def data_for_create
       data = {
         event: @record.paper_trail_event || "create",
         whodunnit: PaperTrail.whodunnit
@@ -176,23 +230,12 @@ module PaperTrail
         data[:object_changes] = recordable_object_changes
       end
       add_transaction_id_to(data)
-      versions_assoc = @record.send(@record.class.versions_association_name)
-      version = versions_assoc.create! merge_metadata(data)
-      update_transaction_id(version)
-      save_associations(version)
+      merge_metadata_into(data)
     end
 
     def record_destroy
       if enabled? && !@record.new_record?
-        data = {
-          item_id: @record.id,
-          item_type: @record.class.base_class.name,
-          event: @record.paper_trail_event || "destroy",
-          object: recordable_object,
-          whodunnit: PaperTrail.whodunnit
-        }
-        add_transaction_id_to(data)
-        version = @record.class.paper_trail.version_class.create(merge_metadata(data))
+        version = @record.class.paper_trail.version_class.create(data_for_destroy)
         if version.errors.any?
           log_version_errors(version, :destroy)
         else
@@ -204,6 +247,20 @@ module PaperTrail
       end
     end
 
+    # Returns data for record destroy
+    # @api private
+    def data_for_destroy
+      data = {
+        item_id: @record.id,
+        item_type: @record.class.base_class.name,
+        event: @record.paper_trail_event || "destroy",
+        object: recordable_object,
+        whodunnit: PaperTrail.whodunnit
+      }
+      add_transaction_id_to(data)
+      merge_metadata_into(data)
+    end
+
     # Returns a boolean indicating whether to store serialized version diffs
     # in the `object_changes` column of the version record.
     # @api private
@@ -213,21 +270,10 @@ module PaperTrail
     end
 
     def record_update(force)
+      @in_after_callback = true
       if enabled? && (force || changed_notably?)
-        data = {
-          event: @record.paper_trail_event || "update",
-          object: recordable_object,
-          whodunnit: PaperTrail.whodunnit
-        }
-        if @record.respond_to?(:updated_at)
-          data[:created_at] = @record.updated_at
-        end
-        if record_object_changes?
-          data[:object_changes] = recordable_object_changes
-        end
-        add_transaction_id_to(data)
         versions_assoc = @record.send(@record.class.versions_association_name)
-        version = versions_assoc.create(merge_metadata(data))
+        version = versions_assoc.create(data_for_update)
         if version.errors.any?
           log_version_errors(version, :update)
         else
@@ -235,6 +281,26 @@ module PaperTrail
           save_associations(version)
         end
       end
+    ensure
+      @in_after_callback = false
+    end
+
+    # Returns data for record update
+    # @api private
+    def data_for_update
+      data = {
+        event: @record.paper_trail_event || "update",
+        object: recordable_object,
+        whodunnit: PaperTrail.whodunnit
+      }
+      if @record.respond_to?(:updated_at)
+        data[:created_at] = @record.updated_at
+      end
+      if record_object_changes?
+        data[:object_changes] = recordable_object_changes
+      end
+      add_transaction_id_to(data)
+      merge_metadata_into(data)
     end
 
     # Returns an object which can be assigned to the `object` attribute of a
@@ -283,49 +349,32 @@ module PaperTrail
     # Saves associations if the join table for `VersionAssociation` exists.
     def save_associations(version)
       return unless PaperTrail.config.track_associations?
-      save_associations_belongs_to(version)
-      save_associations_habtm(version)
+      save_bt_associations(version)
+      save_habtm_associations(version)
     end
 
-    def save_associations_belongs_to(version)
+    # Save all `belongs_to` associations.
+    # @api private
+    def save_bt_associations(version)
       @record.class.reflect_on_all_associations(:belongs_to).each do |assoc|
-        assoc_version_args = {
-          version_id: version.id,
-          foreign_key_name: assoc.foreign_key
-        }
-
-        if assoc.options[:polymorphic]
-          associated_record = @record.send(assoc.name) if @record.send(assoc.foreign_type)
-          if associated_record && associated_record.class.paper_trail.enabled?
-            assoc_version_args[:foreign_key_id] = associated_record.id
-          end
-        elsif assoc.klass.paper_trail.enabled?
-          assoc_version_args[:foreign_key_id] = @record.send(assoc.foreign_key)
-        end
-
-        if assoc_version_args.key?(:foreign_key_id)
-          PaperTrail::VersionAssociation.create(assoc_version_args)
-        end
+        save_bt_association(assoc, version)
       end
     end
 
-    def save_associations_habtm(version)
-      # Use the :added and :removed keys to extrapolate the HABTM associations
-      # to before any changes were made
+    # When a record is created, updated, or destroyed, we determine what the
+    # HABTM associations looked like before any changes were made, by using
+    # the `paper_trail_habtm` data structure. Then, we create
+    # `VersionAssociation` records for each of the associated records.
+    # @api private
+    def save_habtm_associations(version)
       @record.class.reflect_on_all_associations(:has_and_belongs_to_many).each do |a|
-        next unless
-          @record.class.paper_trail_save_join_tables.include?(a.name) ||
-              a.klass.paper_trail.enabled?
-        assoc_version_args = {
-          version_id: version.transaction_id,
-          foreign_key_name: a.name
-        }
-        assoc_ids =
-          @record.send(a.name).to_a.map(&:id) +
-          (@record.paper_trail_habtm.try(:[], a.name).try(:[], :removed) || []) -
-          (@record.paper_trail_habtm.try(:[], a.name).try(:[], :added) || [])
-        assoc_ids.each do |id|
-          PaperTrail::VersionAssociation.create(assoc_version_args.merge(foreign_key_id: id))
+        next unless save_habtm_association?(a)
+        habtm_assoc_ids(a).each do |id|
+          PaperTrail::VersionAssociation.create(
+            version_id: version.transaction_id,
+            foreign_key_name: a.name,
+            foreign_key_id: id
+          )
         end
       end
     end
@@ -352,7 +401,7 @@ module PaperTrail
     # leverage an `after_update` callback anyways (likely for v4.0.0)
     def touch_with_version(name = nil)
       unless @record.persisted?
-        raise ActiveRecordError, "can not touch on a new record object"
+        raise ::ActiveRecord::ActiveRecordError, "can not touch on a new record object"
       end
       attributes = @record.send :timestamp_attributes_for_update_in_model
       attributes << name if name
@@ -360,7 +409,7 @@ module PaperTrail
       attributes.each { |column|
         @record.send(:write_attribute, column, current_time)
       }
-      @record.record_update(true) unless will_record_after_update?
+      record_update(true) unless will_record_after_update?
       @record.save!(validate: false)
     end
 
@@ -421,11 +470,87 @@ module PaperTrail
       data[:transaction_id] = PaperTrail.transaction_id
     end
 
+    # @api private
+    def attribute_changed_in_latest_version?(attr_name)
+      if @in_after_callback && RAILS_GTE_5_1
+        @record.saved_change_to_attribute?(attr_name.to_s)
+      else
+        @record.attribute_changed?(attr_name.to_s)
+      end
+    end
+
+    # @api private
+    def attribute_in_previous_version(attr_name)
+      if @in_after_callback && RAILS_GTE_5_1
+        @record.attribute_before_last_save(attr_name.to_s)
+      else
+        # TODO: after dropping support for rails 4.0, remove send, because
+        # attribute_was is no longer private.
+        @record.send(:attribute_was, attr_name.to_s)
+      end
+    end
+
+    # @api private
+    def changed_in_latest_version
+      if @in_after_callback && RAILS_GTE_5_1
+        @record.saved_changes.keys
+      else
+        @record.changed
+      end
+    end
+
+    # @api private
+    def changes_in_latest_version
+      if @in_after_callback && RAILS_GTE_5_1
+        @record.saved_changes
+      else
+        @record.changes
+      end
+    end
+
+    # Given a HABTM association, returns an array of ids.
+    # @api private
+    def habtm_assoc_ids(habtm_assoc)
+      current = @record.send(habtm_assoc.name).to_a.map(&:id) # TODO: `pluck` would use less memory
+      removed = @record.paper_trail_habtm.try(:[], habtm_assoc.name).try(:[], :removed) || []
+      added = @record.paper_trail_habtm.try(:[], habtm_assoc.name).try(:[], :added) || []
+      current + removed - added
+    end
+
     def log_version_errors(version, action)
-      version.logger.warn(
-        "Unable to create version for #{action} of #{@record.class.name}##{id}: " +
-          version.errors.full_messages.join(", ")
+      version.logger && version.logger.warn(
+        "Unable to create version for #{action} of #{@record.class.name}" +
+          "##{@record.id}: " + version.errors.full_messages.join(", ")
       )
+    end
+
+    # Save a single `belongs_to` association.
+    # @api private
+    def save_bt_association(assoc, version)
+      assoc_version_args = {
+        version_id: version.id,
+        foreign_key_name: assoc.foreign_key
+      }
+
+      if assoc.options[:polymorphic]
+        associated_record = @record.send(assoc.name) if @record.send(assoc.foreign_type)
+        if associated_record && associated_record.class.paper_trail.enabled?
+          assoc_version_args[:foreign_key_id] = associated_record.id
+        end
+      elsif assoc.klass.paper_trail.enabled?
+        assoc_version_args[:foreign_key_id] = @record.send(assoc.foreign_key)
+      end
+
+      if assoc_version_args.key?(:foreign_key_id)
+        PaperTrail::VersionAssociation.create(assoc_version_args)
+      end
+    end
+
+    # Returns true if the given HABTM association should be saved.
+    # @api private
+    def save_habtm_association?(assoc)
+      @record.class.paper_trail_save_join_tables.include?(assoc.name) ||
+        assoc.klass.paper_trail.enabled?
     end
 
     # Returns true if `save` will cause `record_update`

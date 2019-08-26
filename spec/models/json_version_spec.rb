@@ -1,18 +1,17 @@
-require "rails_helper"
+require "spec_helper"
 
 # The `json_versions` table tests postgres' `json` data type. So, that
 # table is only created when testing against postgres and ActiveRecord >= 4.
 if JsonVersion.table_exists?
-
-  describe JsonVersion, type: :model do
-    it "should include the `VersionConcern` module to get base functionality" do
-      expect(JsonVersion).to include(PaperTrail::VersionConcern)
+  RSpec.describe JsonVersion, type: :model do
+    it "includes the VersionConcern module" do
+      expect(described_class).to include(PaperTrail::VersionConcern)
     end
 
     describe "Methods" do
       describe "Class" do
         describe "#where_object" do
-          it { expect(JsonVersion).to respond_to(:where_object) }
+          it { expect(described_class).to respond_to(:where_object) }
 
           it "escapes values" do
             f = Fruit.create(name: "Bobby")
@@ -25,14 +24,14 @@ if JsonVersion.table_exists?
           end
 
           context "invalid arguments" do
-            it "should raise an error" do
-              expect { JsonVersion.where_object(:foo) }.to raise_error(ArgumentError)
-              expect { JsonVersion.where_object([]) }.to raise_error(ArgumentError)
+            it "raises an error" do
+              expect { described_class.where_object(:foo) }.to raise_error(ArgumentError)
+              expect { described_class.where_object([]) }.to raise_error(ArgumentError)
             end
           end
 
           context "valid arguments", versioning: true do
-            let(:fruit_names) { %w(apple orange lemon banana lime coconut strawberry blueberry) }
+            let(:fruit_names) { %w[apple orange lemon banana lime coconut strawberry blueberry] }
             let(:fruit) { Fruit.new }
             let(:name) { "pomegranate" }
             let(:color) { FFaker::Color.name }
@@ -43,15 +42,15 @@ if JsonVersion.table_exists?
               fruit.update_attributes!(name: fruit_names.sample, color: FFaker::Color.name)
             end
 
-            it "should be able to locate versions according to their `object` contents" do
-              expect(JsonVersion.where_object(name: name)).to eq([fruit.versions[1]])
-              expect(JsonVersion.where_object(color: color)).to eq([fruit.versions[2]])
+            it "locates versions according to their `object` contents" do
+              expect(described_class.where_object(name: name)).to eq([fruit.versions[1]])
+              expect(described_class.where_object(color: color)).to eq([fruit.versions[2]])
             end
           end
         end
 
         describe "#where_object_changes" do
-          it { expect(JsonVersion).to respond_to(:where_object_changes) }
+          it { expect(described_class).to respond_to(:where_object_changes) }
 
           it "escapes values" do
             f = Fruit.create(name: "Bobby")
@@ -64,16 +63,16 @@ if JsonVersion.table_exists?
           end
 
           context "invalid arguments" do
-            it "should raise an error" do
-              expect { JsonVersion.where_object_changes(:foo) }.to raise_error(ArgumentError)
-              expect { JsonVersion.where_object_changes([]) }.to raise_error(ArgumentError)
+            it "raises an error" do
+              expect { described_class.where_object_changes(:foo) }.to raise_error(ArgumentError)
+              expect { described_class.where_object_changes([]) }.to raise_error(ArgumentError)
             end
           end
 
           context "valid arguments", versioning: true do
-            let(:color) { %w(red green) }
+            let(:color) { %w[red green] }
             let(:fruit) { Fruit.create!(name: name[0]) }
-            let(:name) { %w(banana kiwi mango) }
+            let(:name) { %w[banana kiwi mango] }
 
             before do
               fruit.update_attributes!(name: name[1], color: color[0])

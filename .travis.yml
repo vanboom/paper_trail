@@ -1,9 +1,8 @@
 language: ruby
 cache: bundler
 rvm:
-  - 2.3.1
-  - 1.9.3
-  - jruby-19mode
+  - 2.3.4
+  - 2.1.10
 env:
   global:
     - TRAVIS=true
@@ -25,17 +24,18 @@ before_script:
   - sh -c "if [ \"$DB\" = 'postgres' ]; then psql -c 'create database paper_trail_foo;'  -U postgres; fi"
 
 gemfile:
-  - gemfiles/ar3.gemfile
-  - gemfiles/ar4.gemfile
-  - gemfiles/ar5.gemfile
+  - gemfiles/ar_4.0.gemfile
+  - gemfiles/ar_4.2.gemfile
+  - gemfiles/ar_5.0.gemfile
+  - gemfiles/ar_5.1.gemfile
 
 matrix:
   fast_finish: true
   exclude:
-    - gemfile: gemfiles/ar5.gemfile
-      rvm: 1.9.3
-    - gemfile: gemfiles/ar5.gemfile
-      rvm: jruby-19mode
+    - gemfile: gemfiles/ar_5.0.gemfile
+      rvm: 2.1.10
+    - gemfile: gemfiles/ar_5.1.gemfile
+      rvm: 2.1.10
 
 addons:
   postgresql: "9.4"

@@ -31,14 +31,16 @@ module PaperTrail
 
     # Adds a callback that records a version after a "create" event.
     def on_create
-      @model_class.after_create :record_create, if: ->(m) { m.paper_trail.save_version? }
+      @model_class.after_create { |r|
+        r.paper_trail.record_create if r.paper_trail.save_version?
+      }
       return if @model_class.paper_trail_options[:on].include?(:create)
       @model_class.paper_trail_options[:on] << :create
     end
 
     # Adds a callback that records a version before or after a "destroy" event.
     def on_destroy(recording_order = "before")
-      unless %w(after before).include?(recording_order.to_s)
+      unless %w[after before].include?(recording_order.to_s)
         raise ArgumentError, 'recording order can only be "after" or "before"'
       end
 
@@ -46,8 +48,10 @@ module PaperTrail
         ::ActiveSupport::Deprecation.warn(E_CANNOT_RECORD_AFTER_DESTROY)
       end
 
-      @model_class.send "#{recording_order}_destroy", :record_destroy,
-        if: ->(m) { m.paper_trail.save_version? }
+      @model_class.send(
+        "#{recording_order}_destroy",
+        ->(r) { r.paper_trail.record_destroy if r.paper_trail.save_version? }
+      )
 
       return if @model_class.paper_trail_options[:on].include?(:destroy)
       @model_class.paper_trail_options[:on] << :destroy
@@ -55,9 +59,15 @@ module PaperTrail
 
     # Adds a callback that records a version after an "update" event.
     def on_update
-      @model_class.before_save :reset_timestamp_attrs_for_update_if_needed!, on: :update
-      @model_class.after_update :record_update, if: ->(m) { m.paper_trail.save_version? }
-      @model_class.after_update :clear_version_instance!
+      @model_class.before_save(on: :update) { |r|
+        r.paper_trail.reset_timestamp_attrs_for_update_if_needed
+      }
+      @model_class.after_update { |r|
+        r.paper_trail.record_update(nil) if r.paper_trail.save_version?
+      }
+      @model_class.after_update { |r|
+        r.paper_trail.clear_version_instance
+      }
       return if @model_class.paper_trail_options[:on].include?(:update)
       @model_class.paper_trail_options[:on] << :update
     end
@@ -66,10 +76,14 @@ module PaperTrail
     # "class attributes", instance methods, and more.
     # @api private
     def setup(options = {})
-      options[:on] ||= [:create, :update, :destroy]
+      options[:on] ||= %i[create update destroy]
       options[:on] = Array(options[:on]) # Support single symbol
       @model_class.send :include, ::PaperTrail::Model::InstanceMethods
       if ::ActiveRecord::VERSION::STRING < "4.2"
+        ::ActiveSupport::Deprecation.warn(
+          "Your version of ActiveRecord (< 4.2) has reached EOL. PaperTrail " \
+          "will soon drop support. Please upgrade ActiveRecord ASAP."
+        )
         @model_class.send :extend, AttributeSerializers::LegacyActiveRecordShim
       end
       setup_options(options)
@@ -114,26 +128,16 @@ module PaperTrail
 
       @model_class.send :attr_accessor, :paper_trail_event
 
-      # In rails 4, the `has_many` syntax for specifying order uses a lambda.
-      if ::ActiveRecord::VERSION::MAJOR >= 4
-        @model_class.has_many(
-          @model_class.versions_association_name,
-          -> { order(model.timestamp_sort_order) },
-          class_name: @model_class.version_class_name,
-          as: :item
-        )
-      else
-        @model_class.has_many(
-          @model_class.versions_association_name,
-          class_name: @model_class.version_class_name,
-          as: :item,
-          order: @model_class.paper_trail.version_class.timestamp_sort_order
-        )
-      end
+      @model_class.has_many(
+        @model_class.versions_association_name,
+        -> { order(model.timestamp_sort_order) },
+        class_name: @model_class.version_class_name,
+        as: :item
+      )
     end
 
     # Adds callbacks to record changes to habtm associations such that on save
-    # the previous version of the association (if changed) can be interpreted.
+    # the previous version of the association (if changed) can be reconstructed.
     def setup_callbacks_for_habtm(join_tables)
       @model_class.send :attr_accessor, :paper_trail_habtm
       @model_class.class_attribute :paper_trail_save_join_tables
@@ -149,7 +153,7 @@ module PaperTrail
 
     def setup_habtm_change_callbacks(assoc)
       assoc_name = assoc.name
-      %w(add remove).each do |verb|
+      %w[add remove].each do |verb|
         @model_class.send(:"before_#{verb}_for_#{assoc_name}").send(
           :<<,
           lambda do |*args|
@@ -163,7 +167,7 @@ module PaperTrail
       @model_class.class_attribute :paper_trail_options
       @model_class.paper_trail_options = options.dup
 
-      [:ignore, :skip, :only].each do |k|
+      %i[ignore skip only].each do |k|
         @model_class.paper_trail_options[k] = [@model_class.paper_trail_options[k]].
           flatten.
           compact.

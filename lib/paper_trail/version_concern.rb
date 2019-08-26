@@ -1,5 +1,7 @@
 require "active_support/concern"
 require "paper_trail/attribute_serializers/object_changes_attribute"
+require "paper_trail/queries/versions/where_object"
+require "paper_trail/queries/versions/where_object_changes"
 
 module PaperTrail
   # Originally, PaperTrail did not provide this module, and all of this
@@ -10,34 +12,26 @@ module PaperTrail
     extend ::ActiveSupport::Concern
 
     included do
-      belongs_to :item, polymorphic: true
+      # The respond_to? check here is specific to ActiveRecord 4.0 and can be
+      # removed when support for ActiveRecord < 4.2 is dropped.
+      if ::ActiveRecord.respond_to?(:gem_version) &&
+          ::ActiveRecord.gem_version >= Gem::Version.new("5.0")
+        belongs_to :item, polymorphic: true, optional: true
+      else
+        belongs_to :item, polymorphic: true
+      end
 
       # Since the test suite has test coverage for this, we want to declare
       # the association when the test suite is running. This makes it pass when
       # DB is not initialized prior to test runs such as when we run on Travis
-      # CI (there won't be a db in `test/dummy/db/`).
+      # CI (there won't be a db in `spec/dummy_app/db/`).
       if PaperTrail.config.track_associations?
         has_many :version_associations, dependent: :destroy
       end
 
       validates_presence_of :event
-
-      if PaperTrail.active_record_protected_attributes?
-        attr_accessible(
-          :item_type,
-          :item_id,
-          :event,
-          :whodunnit,
-          :object,
-          :object_changes,
-          :transaction_id,
-          :created_at
-        )
-      end
-
       after_create :enforce_version_limit!
-
-      scope :within_transaction, ->(id) { where transaction_id: id }
+      scope(:within_transaction, ->(id) { where transaction_id: id })
     end
 
     # :nodoc:
@@ -110,80 +104,78 @@ module PaperTrail
         end
       end
 
-      # Query the `versions.objects` column using the SQL LIKE operator.
-      # Performs an attribute search on the serialized object by invoking the
-      # identically-named method in the serializer being used.
+      # Given a hash of attributes like `name: 'Joan'`, query the
+      # `versions.objects` column.
+      #
+      # ```
+      # SELECT "versions".*
+      # FROM "versions"
+      # WHERE ("versions"."object" LIKE '%
+      # name: Joan
+      # %')
+      # ```
+      #
+      # This is useful for finding versions where a given attribute had a given
+      # value. Imagine, in the example above, that Joan had changed her name
+      # and we wanted to find the versions before that change.
+      #
+      # Based on the data type of the `object` column, the appropriate SQL
+      # operator is used. For example, a text column will use `like`, and a
+      # jsonb column will use `@>`.
+      #
       # @api public
       def where_object(args = {})
         raise ArgumentError, "expected to receive a Hash" unless args.is_a?(Hash)
-
-        if columns_hash["object"].type == :jsonb
-          where("object @> ?", args.to_json)
-        elsif columns_hash["object"].type == :json
-          predicates = []
-          values = []
-          args.each do |field, value|
-            predicates.push "object->>? = ?"
-            values.concat([field, value.to_s])
-          end
-          sql = predicates.join(" and ")
-          where(sql, *values)
-        else
-          arel_field = arel_table[:object]
-          where_conditions = args.map { |field, value|
-            PaperTrail.serializer.where_object_condition(arel_field, field, value)
-          }
-          where_conditions = where_conditions.reduce { |a, e| a.and(e) }
-          where(where_conditions)
-        end
+        Queries::Versions::WhereObject.new(self, args).execute
       end
 
-      # Query the `versions.object_changes` column by attributes, using the
-      # SQL LIKE operator.
+      # Given a hash of attributes like `name: 'Joan'`, query the
+      # `versions.objects_changes` column.
+      #
+      # ```
+      # SELECT "versions".*
+      # FROM "versions"
+      # WHERE .. ("versions"."object_changes" LIKE '%
+      # name:
+      # - Joan
+      # %' OR "versions"."object_changes" LIKE '%
+      # name:
+      # -%
+      # - Joan
+      # %')
+      # ```
+      #
+      # This is useful for finding versions immediately before and after a given
+      # attribute had a given value. Imagine, in the example above, that someone
+      # changed their name to Joan and we wanted to find the versions
+      # immediately before and after that change.
+      #
+      # Based on the data type of the `object` column, the appropriate SQL
+      # operator is used. For example, a text column will use `like`, and a
+      # jsonb column will use `@>`.
+      #
       # @api public
       def where_object_changes(args = {})
         raise ArgumentError, "expected to receive a Hash" unless args.is_a?(Hash)
-
-        if columns_hash["object_changes"].type == :jsonb
-          args.each { |field, value| args[field] = [value] }
-          where("object_changes @> ?", args.to_json)
-        elsif columns_hash["object"].type == :json
-          predicates = []
-          values = []
-          args.each do |field, value|
-            predicates.push(
-              "((object_changes->>? ILIKE ?) OR (object_changes->>? ILIKE ?))"
-            )
-            values.concat([field, "[#{value.to_json},%", field, "[%,#{value.to_json}]%"])
-          end
-          sql = predicates.join(" and ")
-          where(sql, *values)
-        else
-          arel_field = arel_table[:object_changes]
-          where_conditions = args.map { |field, value|
-            PaperTrail.serializer.where_object_changes_condition(arel_field, field, value)
-          }
-          where_conditions = where_conditions.reduce { |a, e| a.and(e) }
-          where(where_conditions)
-        end
+        Queries::Versions::WhereObjectChanges.new(self, args).execute
       end
 
       def primary_key_is_int?
         @primary_key_is_int ||= columns_hash[primary_key].type == :integer
-      rescue
+      rescue StandardError # TODO: Rescue something more specific
         true
       end
 
       # Returns whether the `object` column is using the `json` type supported
       # by PostgreSQL.
       def object_col_is_json?
-        [:json, :jsonb].include?(columns_hash["object"].type)
+        %i[json jsonb].include?(columns_hash["object"].type)
       end
 
       # Returns whether the `object_changes` column is using the `json` type
       # supported by PostgreSQL.
       def object_changes_col_is_json?
-        [:json, :jsonb].include?(columns_hash["object_changes"].try(:type))
+        %i[json jsonb].include?(columns_hash["object_changes"].try(:type))
       end
     end
 
@@ -225,9 +217,7 @@ module PaperTrail
     #
     def reify(options = {})
       return nil if object.nil?
-      without_identity_map do
-        ::PaperTrail::Reifier.reify(self, options)
-      end
+      ::PaperTrail::Reifier.reify(self, options)
     end
 
     # Returns what changed in this version of the item.
@@ -256,7 +246,7 @@ module PaperTrail
     alias version_author terminator
 
     def sibling_versions(reload = false)
-      if reload || @sibling_versions.nil?
+      if reload || !defined?(@sibling_versions) || @sibling_versions.nil?
         @sibling_versions = self.class.with_item_keys(item_type, item_id)
       end
       @sibling_versions
@@ -317,30 +307,19 @@ module PaperTrail
       else
         begin
           PaperTrail.serializer.load(object_changes)
-        rescue # TODO: Rescue something specific
+        rescue StandardError # TODO: Rescue something more specific
           {}
         end
       end
     end
 
-    # In Rails 3.1+, calling reify on a previous version confuses the
-    # IdentityMap, if enabled. This prevents insertion into the map.
-    # @api private
-    def without_identity_map(&block)
-      if defined?(::ActiveRecord::IdentityMap) && ::ActiveRecord::IdentityMap.respond_to?(:without)
-        ::ActiveRecord::IdentityMap.without(&block)
-      else
-        yield
-      end
-    end
-
-    # Checks that a value has been set for the `version_limit` config
-    # option, and if so enforces it.
+    # Enforces the `version_limit`, if set. Default: no limit.
     # @api private
     def enforce_version_limit!
       limit = PaperTrail.config.version_limit
       return unless limit.is_a? Numeric
-      previous_versions = sibling_versions.not_creates
+      previous_versions = sibling_versions.not_creates.
+        order(self.class.timestamp_sort_order("asc"))
       return unless previous_versions.size > limit
       excess_versions = previous_versions - previous_versions.last(limit)
       excess_versions.map(&:destroy)

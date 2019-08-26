@@ -1,10 +1,10 @@
-require "rails_helper"
+require "spec_helper"
 
 module PaperTrail
-  RSpec.describe Config do
+  ::RSpec.describe Config do
     describe ".instance" do
       it "returns the singleton instance" do
-        expect { described_class.instance }.to_not raise_error
+        expect { described_class.instance }.not_to raise_error
       end
     end
 
@@ -27,6 +27,18 @@ module PaperTrail
             expect(config.track_associations?).to eq(false)
           }.to output(/DEPRECATION WARNING/).to_stderr
         end
+      end
+    end
+
+    describe ".version_limit", versioning: true do
+      after { PaperTrail.config.version_limit = nil }
+
+      it "limits the number of versions to 3 (2 plus the created at event)" do
+        PaperTrail.config.version_limit = 2
+        widget = Widget.create!(name: "Henry")
+        6.times { widget.update_attribute(:name, FFaker::Lorem.word) }
+        expect(widget.versions.first.event).to(eq("create"))
+        expect(widget.versions.size).to(eq(3))
       end
     end
   end

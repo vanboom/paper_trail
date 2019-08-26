@@ -1,7 +1,7 @@
-require "rails_helper"
+require "spec_helper"
 
 module Kitchen
-  describe Banana, type: :model do
+  RSpec.describe Banana, type: :model do
     it { is_expected.to be_versioned }
 
     describe "#versions" do

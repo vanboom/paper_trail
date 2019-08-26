@@ -18,21 +18,6 @@ module PaperTrail
       @serializer = PaperTrail::Serializers::YAML
     end
 
-    def serialized_attributes
-      ActiveSupport::Deprecation.warn(
-        "PaperTrail.config.serialized_attributes is deprecated without " +
-          "replacement and always returns false."
-      )
-      false
-    end
-
-    def serialized_attributes=(_)
-      ActiveSupport::Deprecation.warn(
-        "PaperTrail.config.serialized_attributes= is deprecated without " +
-          "replacement and no longer has any effect."
-      )
-    end
-
     # Previously, we checked `PaperTrail::VersionAssociation.table_exists?`
     # here, but that proved to be problematic in situations when the database
     # connection had not been established, or when the database does not exist
@@ -40,7 +25,7 @@ module PaperTrail
     def track_associations?
       if @track_associations.nil?
         ActiveSupport::Deprecation.warn <<-EOS.strip_heredoc.gsub(/\s+/, " ")
-          PaperTrail.track_associations has not been set. As of PaperTrail 5, it
+          PaperTrail.config.track_associations has not been set. As of PaperTrail 5, it
           defaults to false. Tracking associations is an experimental feature so
           we recommend setting PaperTrail.config.track_associations = false in
           your config/initializers/paper_trail.rb

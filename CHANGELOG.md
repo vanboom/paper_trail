@@ -7,8 +7,227 @@ recommendations of [keepachangelog.com](http://keepachangelog.com/).
 
 ### Breaking Changes
 
-- `timestamp_field=` removed without replacement. It is no longer configurable. The
+- None
+
+### Added
+
+- None
+
+### Fixed
+
+- None
+
+## 7.1.3 (2017-09-19)
+
+### Breaking Changes
+
+- None
+
+### Added
+
+- None
+
+### Fixed
+
+- [#988](https://github.com/airblade/paper_trail/pull/988) - Fix ActiveRecord
+  version check in `VersionConcern` for Rails 4.0
+
+## 7.1.2 (2017-08-30)
+
+### Breaking Changes
+
+- None
+
+### Added
+
+- None
+
+### Fixed
+
+- [#985](https://github.com/airblade/paper_trail/pull/985) - Fix RecordInvalid
+  error on nil item association when belongs_to_required_by_default is enabled.
+## 7.1.1 (2017-08-18)
+
+### Breaking Changes
+
+- None
+
+### Added
+
+- None
+
+### Fixed
+
+- Stop including unnecessary files in released gem. Reduces .gem file size
+  from 100K to 30K.
+- [#984](https://github.com/airblade/paper_trail/pull/984) - Fix NameError
+  suspected to be caused by autoload race condition.
+
+## 7.1.0 (2017-07-09)
+
+### Breaking Changes
+
+- None
+
+### Added
+
+- [#803](https://github.com/airblade/paper_trail/issues/803)
+  Deprecate `where_object_changes` when reading json from a text column
+- [#976](https://github.com/airblade/paper_trail/pull/976)
+  `PaperTrail.whodunnit` accepts a `Proc`
+
+### Fixed
+
+- None
+
+## 7.0.3 (2017-06-01)
+
+### Breaking Changes
+
+- None
+
+### Added
+
+- None
+
+### Fixed
+
+- [#959](https://github.com/airblade/paper_trail/pull/959) -
+  Add migration version (eg. `[5.1]`) to all migration generators.
+
+## 7.0.2 (2017-04-26)
+
+### Breaking Changes
+
+- None
+
+### Added
+
+- [#932](https://github.com/airblade/paper_trail/pull/932) -
+  `PaperTrail.whodunnit` now accepts a block.
+
+### Fixed
+
+- [#956](https://github.com/airblade/paper_trail/pull/956) -
+  Fix ActiveRecord >= 5.1 version check
+
+## 7.0.1 (2017-04-10)
+
+### Breaking Changes
+
+- None
+
+### Added
+
+- Generate cleaner migrations for databases other than MySQL
+
+### Fixed
+
+- [#949](https://github.com/airblade/paper_trail/issues/949) - Inherit from the
+  new versioned migration class, e.g. `ActiveRecord::Migration[5.1]`
+
+## 7.0.0 (2017-04-01)
+
+### Breaking Changes
+
+- Drop support for ruby 1.9.3, whose EOL was 2015-02-23
+- Drop support for ruby 2.0.0, whose EOL was 2016-02-24
+- Remove deprecated config methods:
+  - PaperTrail.serialized_attributes?
+  - PaperTrail.config.serialized_attributes
+  - PaperTrail.config.serialized_attributes=
+- Sinatra integration moved to
+  [paper_trail-sinatra](https://github.com/jaredbeck/paper_trail-sinatra) gem
+
+### Added
+
+- `PaperTrail.gem_version` returns a `Gem::Version`, nice for comparisons.
+
+### Fixed
+
+- [#925](https://github.com/airblade/paper_trail/pull/925) - Update RSpec
+  matchers to work with custom version association names
+- [#929](https://github.com/airblade/paper_trail/pull/929) -
+  Fix error calling private method in rails 4.0
+- [#938](https://github.com/airblade/paper_trail/pull/938) - Fix bug where
+  non-standard foreign key names broke belongs_to associations
+- [#940](https://github.com/airblade/paper_trail/pull/940) - When destroying
+  versions to stay under version_limit, don't rely on the database to
+  implicitly return the versions in the right order
+
+## 6.0.2 (2016-12-13)
+
+### Breaking Changes
+
+- None
+
+### Added
+
+- None
+
+### Fixed
+
+- `88e513f` - Surprise argument modification bug in `where_object_changes`
+- `c7efd62` - Column type-detection bug in `where_object_changes`
+- [#905](https://github.com/airblade/paper_trail/pull/905) - Only invoke
+  `logger.warn` if `logger` instance exists
+
+### Code Quality
+
+- Improve Metrics/AbcSize from 30 to 22
+- Improve Metrics/PerceivedComplexity from 10 to 9
+
+## 6.0.1 (2016-12-04)
+
+### Breaking Changes
+
+- None
+
+### Added
+
+- None
+
+### Fixed
+
+- Remove rails 3 features that are no longer supported, most notably,
+  `protected_attributes`.
+
+## 6.0.0 (2016-12-03)
+
+Now with rails 5.1 support, and less model pollution! About 40 methods that were
+polluting your models' namespaces have been removed, reducing the chances of a
+name conflict with your methods.
+
+### Breaking Changes
+
+- [#898](https://github.com/airblade/paper_trail/pull/898) - Dropped support
+  for rails 3
+- [#864](https://github.com/airblade/paper_trail/pull/864) - The model methods
+  deprecated in 5.2.0 have been removed. Use `paper_trail.x` instead of `x`.
+- [#861](https://github.com/airblade/paper_trail/pull/861) - `timestamp_field=`
+  removed without replacement. It is no longer configurable. The
   timestamp field in the `versions` table must now be named `created_at`.
+
+### Deprecated
+
+- None
+
+### Added
+
+- [#900](https://github.com/airblade/paper_trail/pull/900/files) -
+  Support for rails 5.1
+- [#881](https://github.com/airblade/paper_trail/pull/881) - Add RSpec matcher
+  `have_a_version_with_changes` for easier testing.
+
+### Fixed
+
+- None
+
+## 5.2.3 (2016-11-29)
+
+### Breaking Changes
+
+- None
 
 ### Deprecated
 
@@ -19,6 +238,32 @@ recommendations of [keepachangelog.com](http://keepachangelog.com/).
 - None
 
 ### Fixed
+
+- [#889](https://github.com/airblade/paper_trail/pull/889) -
+  Fix warning message in instances when a version can't be persisted due to validation errors.
+- [#868](https://github.com/airblade/paper_trail/pull/868)
+  Fix usage of find_by_id when primary key is not id, affecting reifying certain records.
+
+
+## 5.2.2 (2016-09-08)
+
+### Breaking Changes
+
+- None
+
+### Deprecated
+
+- [#863](https://github.com/airblade/paper_trail/pull/863) -
+  PaperTrail.timestamp_field= deprecated without replacement.
+  See [#861](https://github.com/airblade/paper_trail/pull/861) for discussion.
+
+### Added
+
+- None
+
+### Fixed
+
+- None
 
 ## 5.2.1 (2016-09-02)
 
@@ -189,6 +434,10 @@ recommendations of [keepachangelog.com](http://keepachangelog.com/).
 - None
 
 ## 4.1.0 (2016-01-30)
+
+### Known Issues
+
+- Version changesets now store ENUM values incorrectly (as nulls). Previously the values were stored as strings. This only affects Rails 4, not Rails 5. See [#926](https://github.com/airblade/paper_trail/pull/926)
 
 ### Breaking Changes
 
@@ -387,7 +636,7 @@ candidates.
 ## 3.0.5
 
   - [#401](https://github.com/airblade/paper_trail/issues/401) / [#406](https://github.com/airblade/paper_trail/issues/406) -
-    `PaperTrail::Version` class is not loaded via a `Rails::Engine`, even when the gem is used with in Rails. This feature has
+    `PaperTrail::Version` class is not loaded via a `Rails::Engine`, even when the gem is used within Rails. This feature has
     will be re-introduced in version `4.0`.
   - [#398](https://github.com/airblade/paper_trail/pull/398) - Only require the `RSpec` helper if `RSpec::Core` is required.
 

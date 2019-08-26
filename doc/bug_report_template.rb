@@ -15,6 +15,8 @@ end
 require "active_record"
 require "minitest/autorun"
 require "logger"
+
+# Please use sqlite for your bug reports, if possible.
 ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:")
 ActiveRecord::Base.logger = nil
 ActiveRecord::Schema.define do
@@ -34,7 +36,7 @@ ActiveRecord::Schema.define do
     t.integer :transaction_id
     t.datetime :created_at
   end
-  add_index :versions, [:item_type, :item_id]
+  add_index :versions, %i[item_type item_id]
   add_index :versions, [:transaction_id]
 
   create_table :version_associations do |t|
@@ -43,7 +45,7 @@ ActiveRecord::Schema.define do
     t.integer  :foreign_key_id
   end
   add_index :version_associations, [:version_id]
-  add_index :version_associations, [:foreign_key_name, :foreign_key_id],
+  add_index :version_associations, %i[foreign_key_name foreign_key_id],
     name: "index_version_associations_on_foreign_key"
 end
 ActiveRecord::Base.logger = Logger.new(STDOUT)
@@ -67,3 +69,5 @@ class BugTest < ActiveSupport::TestCase
     }
   end
 end
+
+# STEP SIX: Run this script using `ruby my_bug_report.rb`

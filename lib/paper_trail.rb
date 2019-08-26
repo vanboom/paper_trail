@@ -34,14 +34,6 @@ module PaperTrail
       !!PaperTrail.config.enabled
     end
 
-    def serialized_attributes?
-      ActiveSupport::Deprecation.warn(
-        "PaperTrail.serialized_attributes? is deprecated without replacement " +
-          "and always returns false."
-      )
-      false
-    end
-
     # Sets whether PaperTrail is enabled or disabled for the current request.
     # @api public
     def enabled_for_controller=(value)
@@ -70,6 +62,13 @@ module PaperTrail
       !!paper_trail_store.fetch(:"enabled_for_#{model}", true)
     end
 
+    # Returns a `::Gem::Version`, convenient for comparisons. This is
+    # recommended over `::PaperTrail::VERSION::STRING`.
+    # @api public
+    def gem_version
+      ::Gem::Version.new(VERSION::STRING)
+    end
+
     # Set the field which records when a version was created.
     # @api public
     def timestamp_field=(_field_name)
@@ -88,10 +87,35 @@ module PaperTrail
       paper_trail_store[:whodunnit] = value
     end
 
-    # Returns who is reponsible for any changes that occur.
+    # If nothing passed, returns who is reponsible for any changes that occur.
+    #
+    #   PaperTrail.whodunnit = "someone"
+    #   PaperTrail.whodunnit # => "someone"
+    #
+    # If value and block passed, set this value as whodunnit for the duration of the block
+    #
+    #   PaperTrail.whodunnit("me") do
+    #     puts PaperTrail.whodunnit # => "me"
+    #   end
+    #
     # @api public
-    def whodunnit
-      paper_trail_store[:whodunnit]
+    def whodunnit(value = nil)
+      if value
+        raise ArgumentError, "no block given" unless block_given?
+
+        previous_whodunnit = paper_trail_store[:whodunnit]
+        paper_trail_store[:whodunnit] = value
+
+        begin
+          yield
+        ensure
+          paper_trail_store[:whodunnit] = previous_whodunnit
+        end
+      elsif paper_trail_store[:whodunnit].respond_to?(:call)
+        paper_trail_store[:whodunnit].call
+      else
+        paper_trail_store[:whodunnit]
+      end
     end
 
     # Sets any information from the controller that you want PaperTrail to
@@ -119,15 +143,6 @@ module PaperTrail
     # @api public
     def serializer
       PaperTrail.config.serializer
-    end
-
-    # Returns a boolean indicating whether "protected attibutes" should be
-    # configured, e.g. attr_accessible, mass_assignment_sanitizer,
-    # whitelist_attributes, etc.
-    # @api public
-    def active_record_protected_attributes?
-      @active_record_protected_attributes ||= ::ActiveRecord::VERSION::MAJOR < 4 ||
-        !!defined?(ProtectedAttributes)
     end
 
     # @api public
@@ -167,23 +182,11 @@ module PaperTrail
   end
 end
 
-# If available, ensure that the `protected_attributes` gem is loaded
-# before the `Version` class.
-unless PaperTrail.active_record_protected_attributes?
-  PaperTrail.send(:remove_instance_variable, :@active_record_protected_attributes)
-  begin
-    require "protected_attributes"
-  rescue LoadError # rubocop:disable Lint/HandleExceptions
-    # In case `protected_attributes` gem is not available.
-  end
-end
-
 ActiveSupport.on_load(:active_record) do
   include PaperTrail::Model
 end
 
 # Require frameworks
-require "paper_trail/frameworks/sinatra"
 if defined?(::Rails) && ActiveRecord::VERSION::STRING >= "3.2"
   require "paper_trail/frameworks/rails"
 else

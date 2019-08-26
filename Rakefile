@@ -4,7 +4,10 @@ Bundler::GemHelper.install_tasks
 desc "Set a relevant database.yml for testing"
 task :prepare do
   ENV["DB"] ||= "sqlite"
-  FileUtils.cp "test/dummy/config/database.#{ENV['DB']}.yml", "test/dummy/config/database.yml"
+  FileUtils.cp(
+    "spec/dummy_app/config/database.#{ENV['DB']}.yml",
+    "spec/dummy_app/config/database.yml"
+  )
 end
 
 require "rake/testtask"
@@ -14,6 +17,11 @@ Rake::TestTask.new(:test) do |t|
   t.libs << "test"
   t.pattern = "test/**/*_test.rb"
   t.verbose = false
+
+  # Enabling ruby interpreter warnings (-w) is, sadly, impractical. There are
+  # too many noisy warnings that we have no control over, e.g. caused by libs we
+  # depend on.
+  t.warning = false
 end
 
 require "rspec/core/rake_task"
@@ -27,4 +35,4 @@ require "rubocop/rake_task"
 RuboCop::RakeTask.new
 
 desc "Default: run all available test suites"
-task default: [:rubocop, :prepare, :test, :spec]
+task default: %i[rubocop prepare test spec]
